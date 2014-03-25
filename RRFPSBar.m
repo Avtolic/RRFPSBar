@@ -30,11 +30,13 @@
 #import "RRFPSBar.h"
 #import <QuartzCore/QuartzCore.h>
 
+static const int kHistoryMaxLength = 320;
+static const int kAvgHistoryLength = 20;
 
 @implementation RRFPSBar {
     CADisplayLink          *_displayLink;
     NSUInteger              _historyDTLength;
-    CFTimeInterval          _historyDT[320];
+    CFTimeInterval          _historyDT[kHistoryMaxLength];
     CFTimeInterval          _displayLinkTickTimeLast;
     CFTimeInterval          _lastUIUpdateTime;
     
@@ -73,7 +75,7 @@
                                                  selector: @selector(applicationWillResignActiveNotification)
                                                      name: UIApplicationWillResignActiveNotification
                                                    object: nil];
-
+		
         // Track FPS using display link
         _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkTick)];
         [_displayLink setPaused:YES];
@@ -93,21 +95,21 @@
         [path closePath];
         
         [_linesLayer setPath:path.CGPath];
-
+		
         [self.layer addSublayer:_linesLayer];
-
+		
         // Chart Layer
         _chartLayer = [CAShapeLayer layer];
         [_chartLayer setFrame: self.bounds];
         [_chartLayer setStrokeColor: [UIColor redColor].CGColor];
         [_chartLayer setContentsScale: [UIScreen mainScreen].scale];
         [self.layer addSublayer:_chartLayer];
-
+		
         // Info Layer
         _fpsTextLayer = [CATextLayer layer];
         [_fpsTextLayer setFrame: CGRectMake(5.0f, self.bounds.size.height -9.0f, 100.0f, 10.0f)];
         [_fpsTextLayer setFontSize: 9.0f];
-        [_fpsTextLayer setForegroundColor: [UIColor redColor].CGColor];
+        [_fpsTextLayer setForegroundColor: [UIColor yellowColor].CGColor];
         [_fpsTextLayer setContentsScale: [UIScreen mainScreen].scale];
         [self.layer addSublayer:_fpsTextLayer];
         
@@ -151,55 +153,62 @@
 - (void)displayLinkTick {
     
     // Shift up the buffer
-    for ( int i = _historyDTLength; i >= 1; i-- ) {
+    for ( NSUInteger i = _historyDTLength; i >= 1; i-- ) {
         _historyDT[i] = _historyDT[i -1];
     }
     
     // Store new state
     _historyDT[0] = _displayLink.timestamp -_displayLinkTickTimeLast;
-
+	
     // Update length if there is more place
-	if ( _historyDTLength < 319 ) _historyDTLength++;
+	if ( _historyDTLength < kHistoryMaxLength - 1 ) _historyDTLength++;
     
     // Store last timestamp
     _displayLinkTickTimeLast = _displayLink.timestamp;
     
     // Update UI
     CFTimeInterval timeSinceLastUIUpdate = _displayLinkTickTimeLast -_lastUIUpdateTime;
-    if( _historyDT[0] < 0.1f && timeSinceLastUIUpdate >= _desiredChartUpdateInterval ){
+    if( (_historyDT[0] < 0.1f) && (timeSinceLastUIUpdate >= _desiredChartUpdateInterval) ){
         [self updateChartAndText];
     }
 }
 
 
 - (void)updateChartAndText {
-    
-    UIBezierPath *path = [UIBezierPath bezierPath];
-    [path moveToPoint:CGPointZero];
-
-    CFTimeInterval maxDT = CGFLOAT_MIN;
-    CFTimeInterval avgDT = 0.0f;
-        
-    for( NSUInteger i=0; i<=_historyDTLength; i++ ){
-        maxDT = MAX(maxDT, _historyDT[i]);
+	
+	if (_showsPlot) {
+		UIBezierPath *path = [UIBezierPath bezierPath];
+		[path moveToPoint:CGPointZero];
+		
+		for( NSUInteger i=0; i<=_historyDTLength; i++ ){
+			
+			CGFloat fraction = 1. /_historyDT[i] / 60.0f;
+			fraction = MIN(fraction, 1.);
+			fraction = MAX(fraction, 0.);
+			CGFloat y = 1 + (_chartLayer.frame.size.height - 4) * (1 - fraction);
+			
+			[path addLineToPoint:CGPointMake(1.0f  + i * 320. / kHistoryMaxLength, y)];
+		}
+		_chartLayer.path = path.CGPath;
+	}
+	
+	CFTimeInterval avgDT = 0.0f;
+	CFTimeInterval maxDT = CGFLOAT_MIN;
+	
+	NSUInteger range = MIN(_historyDTLength, kAvgHistoryLength);
+	for( NSUInteger i=0; i <= range; i++ ){
+		maxDT = MAX(maxDT, _historyDT[i]);
         avgDT += _historyDT[i];
-        
-        CGFloat fraction =  roundf(1.0f /(float)_historyDT[i]) /60.0f;
-        CGFloat y = _chartLayer.frame.size.height -_chartLayer.frame.size.height *fraction;
-        y = MAX(0.0f, MIN(_chartLayer.frame.size.height, y));
-        
-        [path addLineToPoint:CGPointMake(i +1.0f, y)];
-    }
-
-    avgDT /= _historyDTLength;
-    _chartLayer.path = path.CGPath;
+	}
+	
+    avgDT /= range;
     
     CFTimeInterval minFPS = roundf(1.0f /(float)maxDT);
     CFTimeInterval avgFPS = roundf(1.0f /(float)avgDT);
-
+	
     NSString *text;
     if( _showsAverage ){
-        text = [NSString stringWithFormat:@"low: %.f | avg: %.f", minFPS, avgFPS];
+        text = [NSString stringWithFormat:@"avg: %.f | low: %.f", avgFPS, minFPS];
     } else {
         text = [NSString stringWithFormat:@"low %.f", minFPS];
     }

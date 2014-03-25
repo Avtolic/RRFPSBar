@@ -34,6 +34,7 @@
 
 //default is no
 @property (nonatomic, readwrite) BOOL showsAverage;
+@property (nonatomic, readwrite) BOOL showsPlot;
 
 + (RRFPSBar *)sharedInstance;
 
